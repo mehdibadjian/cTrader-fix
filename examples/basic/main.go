@@ -15,12 +15,12 @@ func main() {
 	// Configuration for cTrader Demo - Following official Python specification
 	config := &ctrader.Config{
 		BeginString:  "FIX.4.4",
-		SenderCompID: "demo.ctrader.5539991",
+		SenderCompID: "demo.ctrader.YOUR_ID", // Replace YOUR_ID with your actual ID
 		TargetCompID: "cServer",  // FIXED: Must be "cServer" (lowercase 'c')
 		TargetSubID:  "TRADE",    // FIXED: Use TRADE stream for trading
 		SenderSubID:  "TRADE",    // FIXED: Must match TargetSubID
-		Username:     "5539991",  // Numeric login only
-		Password:     "Test1234#",
+		Username:     "YOUR_USERNAME",  // Replace with your actual username
+		Password:     "YOUR_PASSWORD",  // Replace with your actual password
 		HeartBeat:    30,
 	}
 

@@ -166,12 +166,12 @@ func NewTradingBot() *TradingBot {
 	// Configuration for cTrader FIX API - Following official Python specification
 	config := &ctrader.Config{
 		BeginString:  "FIX.4.4",
-		SenderCompID: getEnv("SENDER_COMP_ID", "demo.ctrader.5539991"),
+		SenderCompID: getEnv("SENDER_COMP_ID", "demo.ctrader.YOUR_ID"),  // Replace YOUR_ID with your actual ID
 		TargetCompID: getEnv("TARGET_COMP_ID", "cServer"),  // FIXED: Must be "cServer" (lowercase 'c')
 		TargetSubID:  getEnv("TARGET_SUB_ID", "TRADE"),    // FIXED: Use TRADE stream for trading bot
 		SenderSubID:  getEnv("SENDER_SUB_ID", "TRADE"),    // FIXED: Must match TargetSubID
-		Username:     getEnv("CTRADER_USERNAME", "5539991"), // Numeric login only (correct)
-		Password:     getEnv("CTRADER_PASSWORD", "Test1234#"),
+		Username:     getEnv("CTRADER_USERNAME", "YOUR_USERNAME"), // Replace with your actual username
+		Password:     getEnv("CTRADER_PASSWORD", "YOUR_PASSWORD"), // Replace with your actual password
 		HeartBeat:    30,
 	}
 

@@ -26,20 +26,21 @@ package main
 import (
     "fmt"
     "log"
+    "os"
     
     "github.com/pappi/ctrader-go/pkg/ctrader"
 )
 
 func main() {
-    // Configure your cTrader FIX connection
+    // Configure your cTrader FIX connection using environment variables
     config := &ctrader.Config{
         BeginString:  "FIX.4.4",
-        SenderCompID: "demo.ctrader.5539991",
+        SenderCompID: os.Getenv("SENDER_COMP_ID"), // Set this environment variable
         TargetCompID: "cServer",
         TargetSubID:  "QUOTE",
         SenderSubID:  "QUOTE",
-        Username:     "5539991", // Use numeric login only
-        Password:     "your_password",
+        Username:     os.Getenv("CTRADER_USERNAME"), // Set this environment variable
+        Password:     os.Getenv("CTRADER_PASSWORD"), // Set this environment variable
         HeartBeat:    30,
     }
 
@@ -79,6 +80,51 @@ The client requires a `Config` struct with the following fields:
 - `Username`: Your cTrader username
 - `Password`: Your cTrader password
 - `HeartBeat`: Heartbeat interval in seconds
+
+### Security Best Practices
+
+⚠️ **Never hardcode credentials in your code!** Use environment variables instead:
+
+1. Copy the example environment file:
+```bash
+cp .env.example .env
+```
+
+2. Edit the `.env` file with your actual credentials:
+```bash
+export CTRADER_USERNAME="your_actual_username"
+export CTRADER_PASSWORD="your_actual_password"
+export SENDER_COMP_ID="demo.ctrader.your_actual_id"
+```
+
+3. Load the environment variables in your application:
+```bash
+source .env
+```
+
+Then use them in your Go code:
+
+```go
+config := &ctrader.Config{
+    SenderCompID: os.Getenv("SENDER_COMP_ID"),
+    Username:     os.Getenv("CTRADER_USERNAME"),
+    Password:     os.Getenv("CTRADER_PASSWORD"),
+    // ... other fields
+}
+```
+
+Or use the helper functions with defaults:
+
+```go
+import "github.com/pappi/ctrader-go/examples/trading-bot"
+
+config := &ctrader.Config{
+    SenderCompID: getEnv("SENDER_COMP_ID", "demo.ctrader.YOUR_ID"),
+    Username:     getEnv("CTRADER_USERNAME", "YOUR_USERNAME"),
+    Password:     getEnv("CTRADER_PASSWORD", "YOUR_PASSWORD"),
+    // ... other fields
+}
+```
 
 ## Message Types
 
