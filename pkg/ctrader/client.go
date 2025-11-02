@@ -1,7 +1,6 @@
 package ctrader
 
 import (
-	"bufio"
 	"crypto/tls"
 	"context"
 	"fmt"
@@ -199,28 +198,36 @@ func (c *Client) readMessages() {
 		}
 	}()
 	
-	scanner := bufio.NewScanner(c.conn)
-	var currentMessage strings.Builder
+	buffer := make([]byte, 4096)
+	var messageBuffer []byte
 	
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		default:
-			if !scanner.Scan() {
-				if err := scanner.Err(); err != nil {
-					c.errorChan <- fmt.Errorf("scanner error: %w", err)
-				}
+			n, err := c.conn.Read(buffer)
+			if err != nil {
+				c.errorChan <- fmt.Errorf("read error: %w", err)
 				c.handleDisconnection()
 				return
 			}
 			
-			data := scanner.Text()
-			currentMessage.WriteString(data)
+			messageBuffer = append(messageBuffer, buffer[:n]...)
 			
-			messageStr := currentMessage.String()
-			if strings.Contains(messageStr, "10=") && strings.HasSuffix(data, c.delimiter) {
-				responseMessage := NewResponseMessage(messageStr, c.delimiter)
+			// Process complete messages
+			for {
+				messageEnd := c.findMessageEnd(messageBuffer)
+				if messageEnd == -1 {
+					break // No complete message found
+				}
+				
+				// Extract complete message
+				message := string(messageBuffer[:messageEnd])
+				messageBuffer = messageBuffer[messageEnd:]
+				
+				// Parse and send message
+				responseMessage := NewResponseMessage(message, c.delimiter)
 				
 				select {
 				case c.messageChan <- responseMessage:
@@ -228,11 +235,25 @@ func (c *Client) readMessages() {
 					return
 				default:
 				}
-				
-				currentMessage.Reset()
 			}
 		}
 	}
+}
+
+func (c *Client) findMessageEnd(buffer []byte) int {
+	// Look for pattern "10=XXX" where XXX is checksum followed by SOH
+	for i := 0; i < len(buffer)-4; i++ {
+		if buffer[i] == '1' && buffer[i+1] == '0' && buffer[i+2] == '=' {
+			// Found "10=", now look for end SOH
+			for j := i + 3; j < len(buffer); j++ {
+				if buffer[j] == byte(c.delimiter[0]) {
+					// Return message end without strict checksum validation
+					return j + 1
+				}
+			}
+		}
+	}
+	return -1
 }
 
 func (c *Client) handleDisconnection() {

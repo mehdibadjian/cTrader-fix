@@ -116,7 +116,7 @@ func (rm *RequestMessage) getHeader(lenBody int, sequenceNumber int) string {
 	fields = append(fields, fmt.Sprintf("57=%s", rm.config.TargetSubID))
 	fields = append(fields, fmt.Sprintf("50=%s", rm.config.SenderSubID))
 	fields = append(fields, fmt.Sprintf("34=%d", sequenceNumber))
-	fields = append(fields, fmt.Sprintf("52=%s", time.Now().UTC().Format("20060102-15:04:05.000")))
+	fields = append(fields, fmt.Sprintf("52=%s", time.Now().UTC().Format("20060102-15:04:05")))
 	
 	fieldsJoined := strings.Join(fields, rm.delimiter)
 	return fmt.Sprintf("8=%s%s9=%d%s%s", rm.config.BeginString, rm.delimiter, lenBody+len(fieldsJoined)+2, rm.delimiter, fieldsJoined)
@@ -150,13 +150,13 @@ func (lr *LogonRequest) GetMessage(sequenceNumber int) string {
 	body := lr.GetBody()
 	var headerAndBody string
 	if body != "" {
-		header := lr.getHeader(len(body), sequenceNumber)
+		header := lr.RequestMessage.getHeader(len(body), sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s%s%s", header, lr.delimiter, body, lr.delimiter)
 	} else {
-		header := lr.getHeader(0, sequenceNumber)
+		header := lr.RequestMessage.getHeader(0, sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s", header, lr.delimiter)
 	}
-	trailer := lr.getTrailer(headerAndBody)
+	trailer := lr.RequestMessage.getTrailer(headerAndBody)
 	return fmt.Sprintf("%s%s%s", headerAndBody, trailer, lr.delimiter)
 }
 
@@ -187,13 +187,13 @@ func (h *Heartbeat) GetMessage(sequenceNumber int) string {
 	body := h.GetBody()
 	var headerAndBody string
 	if body != "" {
-		header := h.getHeader(len(body), sequenceNumber)
+		header := h.RequestMessage.getHeader(len(body), sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s%s%s", header, h.delimiter, body, h.delimiter)
 	} else {
-		header := h.getHeader(0, sequenceNumber)
+		header := h.RequestMessage.getHeader(0, sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s", header, h.delimiter)
 	}
-	trailer := h.getTrailer(headerAndBody)
+	trailer := h.RequestMessage.getTrailer(headerAndBody)
 	return fmt.Sprintf("%s%s%s", headerAndBody, trailer, h.delimiter)
 }
 
@@ -219,13 +219,13 @@ func (tr *TestRequest) GetMessage(sequenceNumber int) string {
 	body := tr.GetBody()
 	var headerAndBody string
 	if body != "" {
-		header := tr.getHeader(len(body), sequenceNumber)
+		header := tr.RequestMessage.getHeader(len(body), sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s%s%s", header, tr.delimiter, body, tr.delimiter)
 	} else {
-		header := tr.getHeader(0, sequenceNumber)
+		header := tr.RequestMessage.getHeader(0, sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s", header, tr.delimiter)
 	}
-	trailer := tr.getTrailer(headerAndBody)
+	trailer := tr.RequestMessage.getTrailer(headerAndBody)
 	return fmt.Sprintf("%s%s%s", headerAndBody, trailer, tr.delimiter)
 }
 
@@ -241,13 +241,13 @@ func (lr *LogoutRequest) GetMessage(sequenceNumber int) string {
 	body := lr.GetBody()
 	var headerAndBody string
 	if body != "" {
-		header := lr.getHeader(len(body), sequenceNumber)
+		header := lr.RequestMessage.getHeader(len(body), sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s%s%s", header, lr.delimiter, body, lr.delimiter)
 	} else {
-		header := lr.getHeader(0, sequenceNumber)
+		header := lr.RequestMessage.getHeader(0, sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s", header, lr.delimiter)
 	}
-	trailer := lr.getTrailer(headerAndBody)
+	trailer := lr.RequestMessage.getTrailer(headerAndBody)
 	return fmt.Sprintf("%s%s%s", headerAndBody, trailer, lr.delimiter)
 }
 
@@ -281,13 +281,13 @@ func (nos *OrderMsg) GetMessage(sequenceNumber int) string {
 	body := nos.GetBody()
 	var headerAndBody string
 	if body != "" {
-		header := nos.getHeader(len(body), sequenceNumber)
+		header := nos.RequestMessage.getHeader(len(body), sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s%s%s", header, nos.delimiter, body, nos.delimiter)
 	} else {
-		header := nos.getHeader(0, sequenceNumber)
+		header := nos.RequestMessage.getHeader(0, sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s", header, nos.delimiter)
 	}
-	trailer := nos.getTrailer(headerAndBody)
+	trailer := nos.RequestMessage.getTrailer(headerAndBody)
 	return fmt.Sprintf("%s%s%s", headerAndBody, trailer, nos.delimiter)
 }
 
@@ -322,13 +322,13 @@ func (ocr *OrderCancelRequest) GetMessage(sequenceNumber int) string {
 	body := ocr.GetBody()
 	var headerAndBody string
 	if body != "" {
-		header := ocr.getHeader(len(body), sequenceNumber)
+		header := ocr.RequestMessage.getHeader(len(body), sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s%s%s", header, ocr.delimiter, body, ocr.delimiter)
 	} else {
-		header := ocr.getHeader(0, sequenceNumber)
+		header := ocr.RequestMessage.getHeader(0, sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s", header, ocr.delimiter)
 	}
-	trailer := ocr.getTrailer(headerAndBody)
+	trailer := ocr.RequestMessage.getTrailer(headerAndBody)
 	return fmt.Sprintf("%s%s%s", headerAndBody, trailer, ocr.delimiter)
 }
 
@@ -363,13 +363,13 @@ func (mdr *MarketDataRequest) GetMessage(sequenceNumber int) string {
 	body := mdr.GetBody()
 	var headerAndBody string
 	if body != "" {
-		header := mdr.getHeader(len(body), sequenceNumber)
+		header := mdr.RequestMessage.getHeader(len(body), sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s%s%s", header, mdr.delimiter, body, mdr.delimiter)
 	} else {
-		header := mdr.getHeader(0, sequenceNumber)
+		header := mdr.RequestMessage.getHeader(0, sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s", header, mdr.delimiter)
 	}
-	trailer := mdr.getTrailer(headerAndBody)
+	trailer := mdr.RequestMessage.getTrailer(headerAndBody)
 	return fmt.Sprintf("%s%s%s", headerAndBody, trailer, mdr.delimiter)
 }
 
@@ -402,13 +402,13 @@ func (slr *SecurityListRequest) GetMessage(sequenceNumber int) string {
 	body := slr.GetBody()
 	var headerAndBody string
 	if body != "" {
-		header := slr.getHeader(len(body), sequenceNumber)
+		header := slr.RequestMessage.getHeader(len(body), sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s%s%s", header, slr.delimiter, body, slr.delimiter)
 	} else {
-		header := slr.getHeader(0, sequenceNumber)
+		header := slr.RequestMessage.getHeader(0, sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s", header, slr.delimiter)
 	}
-	trailer := slr.getTrailer(headerAndBody)
+	trailer := slr.RequestMessage.getTrailer(headerAndBody)
 	return fmt.Sprintf("%s%s%s", headerAndBody, trailer, slr.delimiter)
 }
 
@@ -438,13 +438,13 @@ func (rfp *RequestForPositions) GetMessage(sequenceNumber int) string {
 	body := rfp.GetBody()
 	var headerAndBody string
 	if body != "" {
-		header := rfp.getHeader(len(body), sequenceNumber)
+		header := rfp.RequestMessage.getHeader(len(body), sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s%s%s", header, rfp.delimiter, body, rfp.delimiter)
 	} else {
-		header := rfp.getHeader(0, sequenceNumber)
+		header := rfp.RequestMessage.getHeader(0, sequenceNumber)
 		headerAndBody = fmt.Sprintf("%s%s", header, rfp.delimiter)
 	}
-	trailer := rfp.getTrailer(headerAndBody)
+	trailer := rfp.RequestMessage.getTrailer(headerAndBody)
 	return fmt.Sprintf("%s%s%s", headerAndBody, trailer, rfp.delimiter)
 }
 

@@ -9,20 +9,23 @@ import (
 )
 
 func main() {
-	// Configuration for cTrader FIX API
+	fmt.Println("cTrader FIX API Basic Example")
+	fmt.Println("==============================")
+	
+	// Configuration for cTrader Demo - Following official Python specification
 	config := &ctrader.Config{
 		BeginString:  "FIX.4.4",
 		SenderCompID: "demo.ctrader.5539991",
-		TargetCompID: "cServer",
-		TargetSubID:  "QUOTE",
-		SenderSubID:  "QUOTE",
-		Username:     "5539991", // Use numeric login only
+		TargetCompID: "cServer",  // FIXED: Must be "cServer" (lowercase 'c')
+		TargetSubID:  "TRADE",    // FIXED: Use TRADE stream for trading
+		SenderSubID:  "TRADE",    // FIXED: Must match TargetSubID
+		Username:     "5539991",  // Numeric login only
 		Password:     "Test1234#",
 		HeartBeat:    30,
 	}
 
-	// Create client with SSL/TLS
-	client := ctrader.NewClient("demo-uk-eqx-01.p.c-trader.com", 5211, config, ctrader.WithSSL(true))
+	// Create client with SSL/TLS encryption
+	client := ctrader.NewClient("demo-uk-eqx-01.p.c-trader.com", 5212, config, ctrader.WithSSL(true)) // FIXED: Port 5212 for TRADE
 
 	// Set callbacks
 	client.SetConnectedCallback(func() {
