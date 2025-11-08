@@ -16,13 +16,14 @@ import (
 )
 
 type TradingBot struct {
-	client      *ctrader.Client
-	config      *ctrader.Config
-	orderID     int
-	positionID  string
-	symbol      string
-	symbolID    string // Numeric symbol ID for trading
-	isRunning   bool
+	quoteClient  *ctrader.Client  // For market data
+	tradeClient  *ctrader.Client  // For trading operations
+	config       *ctrader.Config
+	orderID      int
+	positionID   string
+	symbol       string
+	symbolID     string // Numeric symbol ID for trading
+	isRunning    bool
 	
 	// Enhanced trading features
 	balance     float64
@@ -163,19 +164,33 @@ func calculateSMA(prices []float64, period int) float64 {
 }
 
 func NewTradingBot() *TradingBot {
-	// Configuration for cTrader FIX API - Following official Python specification
-	config := &ctrader.Config{
+	// Configuration for QUOTE session
+	quoteConfig := &ctrader.Config{
 		BeginString:  "FIX.4.4",
-		SenderCompID: getEnv("SENDER_COMP_ID", "demo.ctrader.YOUR_ID"),  // Replace YOUR_ID with your actual ID
-		TargetCompID: getEnv("TARGET_COMP_ID", "cServer"),  // FIXED: Must be "cServer" (lowercase 'c')
-		TargetSubID:  getEnv("TARGET_SUB_ID", "TRADE"),    // FIXED: Use TRADE stream for trading bot
-		SenderSubID:  getEnv("SENDER_SUB_ID", "TRADE"),    // FIXED: Must match TargetSubID
-		Username:     getEnv("CTRADER_USERNAME", "YOUR_USERNAME"), // Replace with your actual username
-		Password:     getEnv("CTRADER_PASSWORD", "YOUR_PASSWORD"), // Replace with your actual password
+		SenderCompID: getEnv("SENDER_COMP_ID", "demo.ctrader.YOUR_ID"),
+		TargetCompID: getEnv("TARGET_COMP_ID", "cServer"),
+		TargetSubID:  "QUOTE",
+		SenderSubID:  "QUOTE",
+		Username:     getEnv("CTRADER_USERNAME", "YOUR_USERNAME"),
+		Password:     getEnv("CTRADER_PASSWORD", "YOUR_PASSWORD"),
 		HeartBeat:    30,
 	}
 
-	client := ctrader.NewClient("demo-uk-eqx-01.p.c-trader.com", 5212, config, ctrader.WithSSL(true)) // FIXED: Port 5212 for TRADE
+	// Configuration for TRADE session
+	tradeConfig := &ctrader.Config{
+		BeginString:  "FIX.4.4",
+		SenderCompID: getEnv("SENDER_COMP_ID", "demo.ctrader.YOUR_ID"),
+		TargetCompID: getEnv("TARGET_COMP_ID", "cServer"),
+		TargetSubID:  "TRADE",
+		SenderSubID:  "TRADE",
+		Username:     getEnv("CTRADER_USERNAME", "YOUR_USERNAME"),
+		Password:     getEnv("CTRADER_PASSWORD", "YOUR_PASSWORD"),
+		HeartBeat:    30,
+	}
+
+	// Create separate clients
+	quoteClient := ctrader.NewClient("demo-uk-eqx-01.p.c-trader.com", 5211, quoteConfig, ctrader.WithSSL(true))
+	tradeClient := ctrader.NewClient("demo-uk-eqx-01.p.c-trader.com", 5212, tradeConfig, ctrader.WithSSL(true))
 
 	// Initialize strategy
 	strategy := &MAStrategy{
@@ -185,11 +200,12 @@ func NewTradingBot() *TradingBot {
 	}
 
 	bot := &TradingBot{
-		client:          client,
-		config:          config,
-		orderID:         1000,
-		symbol:          getEnv("SYMBOL", "BTCUSD"), // Changed to BTCUSD as per user
-		isRunning:       false,
+		quoteClient:      quoteClient,
+		tradeClient:      tradeClient,
+		config:           quoteConfig, // Use quoteConfig as default
+		orderID:          1000,
+		symbol:           getEnv("SYMBOL", "EURUSD"),
+		isRunning:        false,
 		
 		// Initialize trading features
 		balance:         getEnvFloat("BALANCE", 10000.0), // $10,000 demo account
@@ -225,32 +241,64 @@ func NewTradingBot() *TradingBot {
 }
 
 func (bot *TradingBot) Start() error {
-	// Set callbacks
-	bot.client.SetConnectedCallback(bot.onConnected)
-	bot.client.SetDisconnectedCallback(bot.onDisconnected)
-	bot.client.SetMessageCallback(bot.onMessage)
+	// Set callbacks for quote client
+	bot.quoteClient.SetConnectedCallback(bot.onQuoteConnected)
+	bot.quoteClient.SetDisconnectedCallback(bot.onQuoteDisconnected)
+	bot.quoteClient.SetMessageCallback(bot.onQuoteMessage)
 
-	// Connect to server
-	fmt.Println("Connecting to cTrader FIX server...")
-	if err := bot.client.Connect(); err != nil {
-		return fmt.Errorf("failed to connect: %v", err)
+	// Set callbacks for trade client
+	bot.tradeClient.SetConnectedCallback(bot.onTradeConnected)
+	bot.tradeClient.SetDisconnectedCallback(bot.onTradeDisconnected)
+	bot.tradeClient.SetMessageCallback(bot.onTradeMessage)
+
+	// Connect to quote server first
+	fmt.Println("Connecting to cTrader QUOTE server...")
+	if err := bot.quoteClient.Connect(); err != nil {
+		return fmt.Errorf("failed to connect to quote server: %v", err)
 	}
 
-	// Start message processing
+	// Wait a moment then connect to trade server
 	go func() {
-		for message := range bot.client.Messages() {
-			bot.processMessage(message)
+		time.Sleep(2 * time.Second)
+		fmt.Println("Connecting to cTrader TRADE server...")
+		if err := bot.tradeClient.Connect(); err != nil {
+			fmt.Printf("Failed to connect to trade server: %v\n", err)
+		}
+	}()
+
+	// Start message processing for both clients
+	go func() {
+		fmt.Println("🔄 Starting quote message processor...")
+		for message := range bot.quoteClient.Messages() {
+			fmt.Printf("📨 Quote channel message: %s\n", message.GetMessageType())
+			bot.processQuoteMessage(message)
 		}
 	}()
 
 	go func() {
-		for err := range bot.client.Errors() {
-			fmt.Printf("Error: %v\n", err)
+		fmt.Println("🔄 Starting trade message processor...")
+		for message := range bot.tradeClient.Messages() {
+			fmt.Printf("📨 Trade channel message: %s\n", message.GetMessageType())
+			bot.processTradeMessage(message)
+		}
+	}()
+
+	go func() {
+		fmt.Println("🔄 Starting quote error processor...")
+		for err := range bot.quoteClient.Errors() {
+			fmt.Printf("❌ Quote client error: %v\n", err)
+		}
+	}()
+
+	go func() {
+		fmt.Println("🔄 Starting trade error processor...")
+		for err := range bot.tradeClient.Errors() {
+			fmt.Printf("❌ Trade client error: %v\n", err)
 		}
 	}()
 
 	bot.isRunning = true
-	fmt.Println("Trading bot started")
+	fmt.Println("Trading bot started with separate QUOTE/TRADE sessions")
 
 	// Wait for shutdown signal
 	sigChan := make(chan os.Signal, 1)
@@ -265,45 +313,166 @@ func (bot *TradingBot) Start() error {
 func (bot *TradingBot) Stop() {
 	bot.isRunning = false
 	
-	if bot.client.IsConnected() {
-		// Send logout message
+	// Disconnect both clients
+	if bot.quoteClient.IsConnected() {
 		logoutMsg := ctrader.NewLogoutRequest(bot.config)
-		bot.client.Send(logoutMsg)
-		
-		// Disconnect
-		bot.client.Disconnect()
+		bot.quoteClient.Send(logoutMsg)
+		bot.quoteClient.Disconnect()
 	}
 	
-	fmt.Println("Trading bot stopped")
+	if bot.tradeClient.IsConnected() {
+		logoutMsg := ctrader.NewLogoutRequest(bot.config)
+		bot.tradeClient.Send(logoutMsg)
+		bot.tradeClient.Disconnect()
+	}
+	
+	fmt.Println("Trading bot stopped - both QUOTE/TRADE sessions closed")
 }
 
-func (bot *TradingBot) onConnected() {
-	fmt.Println("Connected to cTrader FIX server")
+func (bot *TradingBot) onQuoteConnected() {
+	fmt.Println("✅ Connected to cTrader QUOTE server")
 	
-	// Send logon message
 	logonMsg := ctrader.NewLogonRequest(bot.config)
 	logonMsg.ResetSeqNum = true
 	
-	if err := bot.client.Send(logonMsg); err != nil {
-		log.Printf("Failed to send logon: %v", err)
+	if err := bot.quoteClient.Send(logonMsg); err != nil {
+		log.Printf("Failed to send quote logon: %v", err)
 	} else {
-		fmt.Println("Logon message sent")
+		fmt.Println("✅ Quote logon message sent")
 	}
+}
+
+func (bot *TradingBot) onTradeConnected() {
+	fmt.Println("✅ Connected to cTrader TRADE server")
+	
+	tradeConfig := &ctrader.Config{
+		BeginString:  "FIX.4.4",
+		SenderCompID: bot.config.SenderCompID,
+		TargetCompID: "cServer",
+		TargetSubID:  "TRADE",
+		SenderSubID:  "TRADE",
+		Username:     bot.config.Username,
+		Password:     bot.config.Password,
+		HeartBeat:    30,
+	}
+	
+	logonMsg := ctrader.NewLogonRequest(tradeConfig)
+	logonMsg.ResetSeqNum = true
+	
+	if err := bot.tradeClient.Send(logonMsg); err != nil {
+		log.Printf("Failed to send trade logon: %v", err)
+	} else {
+		fmt.Println("✅ Trade logon message sent")
+	}
+}
+
+func (bot *TradingBot) onQuoteDisconnected(err error) {
+	fmt.Printf("❌ Quote client disconnected: %v\n", err)
+	bot.isRunning = false
+}
+
+func (bot *TradingBot) onTradeDisconnected(err error) {
+	fmt.Printf("❌ Trade client disconnected: %v\n", err)
+	bot.isRunning = false
+}
+
+func (bot *TradingBot) onQuoteMessage(message *ctrader.ResponseMessage) {
+	msgType := message.GetMessageType()
+	fmt.Printf("📨 Quote message: %s\n", msgType)
+
+	switch msgType {
+	case "A": // Logon
+		fmt.Println("✅ Quote logon successful")
+		
+	case "0": // Heartbeat
+		// Silent heartbeat handling
+		
+	case "1": // Test Request
+		testReqID := message.GetFieldValue(112)
+		fmt.Printf("🧪 Quote test request: %v\n", testReqID)
+		
+		// Respond with heartbeat
+		heartbeat := ctrader.NewHeartbeat(bot.config)
+		heartbeat.TestReqID = fmt.Sprintf("%v", testReqID)
+		if err := bot.quoteClient.Send(heartbeat); err != nil {
+			fmt.Printf("❌ Failed to send quote heartbeat: %v\n", err)
+		} else {
+			fmt.Println("✅ Quote heartbeat response sent")
+		}
+		
+	case "W": // Market Data
+		bot.handleMarketData(message)
+	}
+}
+
+func (bot *TradingBot) onTradeMessage(message *ctrader.ResponseMessage) {
+	msgType := message.GetMessageType()
+	fmt.Printf("📨 Trade message received: %s\n", msgType)
+
+	switch msgType {
+	case "A": // Logon
+		fmt.Println("✅ Trade logon successful - Starting trading system")
+		bot.startTrading()
+		
+	case "0": // Heartbeat
+		fmt.Println("💓 Trade heartbeat received")
+		
+	case "1": // Test Request
+		testReqID := message.GetFieldValue(112)
+		fmt.Printf("🧪 Trade test request: %v\n", testReqID)
+		
+		tradeConfig := &ctrader.Config{
+			BeginString:  "FIX.4.4",
+			SenderCompID: bot.config.SenderCompID,
+			TargetCompID: "cServer",
+			TargetSubID:  "TRADE",
+			SenderSubID:  "TRADE",
+			Username:     bot.config.Username,
+			Password:     bot.config.Password,
+			HeartBeat:    30,
+		}
+		
+		// Respond with heartbeat
+		heartbeat := ctrader.NewHeartbeat(tradeConfig)
+		heartbeat.TestReqID = fmt.Sprintf("%v", testReqID)
+		if err := bot.tradeClient.Send(heartbeat); err != nil {
+			fmt.Printf("❌ Failed to send trade heartbeat: %v\n", err)
+		} else {
+			fmt.Println("✅ Trade heartbeat response sent")
+		}
+		
+	case "8": // Execution Report
+		fmt.Println("📋 Trade execution report received")
+		bot.handleExecutionReport(message)
+		
+	default:
+		fmt.Printf("❓ Unhandled trade message type: %s\n", msgType)
+	}
+}
+
+func (bot *TradingBot) processQuoteMessage(message *ctrader.ResponseMessage) {
+	// Call the quote message callback
+	bot.onQuoteMessage(message)
+}
+
+func (bot *TradingBot) processTradeMessage(message *ctrader.ResponseMessage) {
+	// Call the trade message callback
+	bot.onTradeMessage(message)
 }
 
 func (bot *TradingBot) requestSecurityList() {
 	fmt.Println("📋 Requesting available trading symbols...")
 	
-	// Since BTCUSD is not available on this demo server, use EURUSD (most liquid forex pair)
+	// Use quote client for security list
 	securityReq := ctrader.NewSecurityListRequest(bot.config)
 	securityReq.SecurityReqID = "SEC_REQ_EURUSD"
 	securityReq.SecurityListRequestType = "0" // Symbol
 	securityReq.Symbol = "1" // EURUSD (symbol ID 1)
 	
-	if err := bot.client.Send(securityReq); err != nil {
+	if err := bot.quoteClient.Send(securityReq); err != nil {
 		fmt.Printf("❌ Failed to request security list: %v\n", err)
 	} else {
-		fmt.Println("✅ Security list request sent for EURUSD (BTCUSD not available on demo)")
+		fmt.Println("✅ Security list request sent for EURUSD")
 	}
 }
 
@@ -366,7 +535,7 @@ func (bot *TradingBot) requestMarketData() {
 	mdReq.NoRelatedSym = 1
 	mdReq.Symbol = bot.symbolID
 	
-	if err := bot.client.Send(mdReq); err != nil {
+	if err := bot.quoteClient.Send(mdReq); err != nil {
 		fmt.Printf("❌ Failed to request market data: %v\n", err)
 	} else {
 		fmt.Println("✅ Market data request sent")
@@ -376,111 +545,40 @@ func (bot *TradingBot) requestMarketData() {
 func (bot *TradingBot) requestPositions() {
 	fmt.Println("📋 Requesting positions...")
 	
-	posReq := ctrader.NewRequestForPositions(bot.config)
+	tradeConfig := &ctrader.Config{
+		BeginString:  "FIX.4.4",
+		SenderCompID: bot.config.SenderCompID,
+		TargetCompID: "cServer",
+		TargetSubID:  "TRADE",
+		SenderSubID:  "TRADE",
+		Username:     bot.config.Username,
+		Password:     bot.config.Password,
+		HeartBeat:    30,
+	}
+	
+	posReq := ctrader.NewRequestForPositions(tradeConfig)
 	posReq.PosReqID = "POS_REQ_001"
 	
-	if err := bot.client.Send(posReq); err != nil {
+	if err := bot.tradeClient.Send(posReq); err != nil {
 		fmt.Printf("❌ Failed to request positions: %v\n", err)
 	} else {
 		fmt.Println("✅ Positions request sent")
 	}
 }
 
-func (bot *TradingBot) onDisconnected(err error) {
-	fmt.Printf("Disconnected from server: %v\n", err)
-	bot.isRunning = false
-}
 
-func (bot *TradingBot) processMessage(message *ctrader.ResponseMessage) {
-	msgType := message.GetMessageType()
-	
-	switch msgType {
-	case "A": // Logon
-		fmt.Println("✅ Logon successful - Starting trading system")
-		bot.startTrading()
-		
-	case "0": // Heartbeat
-		// Silent heartbeat handling
-		
-	case "1": // Test Request
-		bot.handleTestRequest(message)
-		
-	case "8": // Execution Report
-		bot.handleExecutionReport(message)
-		
-	case "3": // Order Reject
-		fmt.Println("❌ Order Rejected")
-		bot.handleOrderReject(message)
-		
-	case "y": // Security List Response
-		fmt.Println("📋 Security List Response received")
-		bot.handleSecurityListResponse(message)
-		
-	case "j": // Security List Reject
-		fmt.Println("❌ Security List Reject")
-		bot.handleSecurityListReject(message)
-		
-	case "W": // Market Data
-		bot.handleMarketData(message)
-		
-	case "5": // Logout
-		fmt.Println("👋 Logout received")
-		bot.isRunning = false
-		
-	default:
-		fmt.Printf("📨 Received message type: %s\n", msgType)
-	}
-}
-
-func (bot *TradingBot) onMessage(message *ctrader.ResponseMessage) {
-	msgType := message.GetMessageType()
-	fmt.Printf("📨 Received message type: %s\n", msgType)
-
-	switch msgType {
-	case "A": // Logon
-		fmt.Println("✅ Logon successful - Starting trading system")
-		bot.startTrading()
-		
-	case "0": // Heartbeat
-		// Silent heartbeat handling
-		
-	case "1": // Test Request
-		bot.handleTestRequest(message)
-		
-	case "8": // Execution Report
-		bot.handleExecutionReport(message)
-		
-	case "AP": // Trade Capture Report
-		bot.handleTradeCaptureReport(message)
-		
-	case "AO": // Position Report
-		bot.handlePositionReport(message)
-		
-	case "W": // Market Data
-		bot.handleMarketData(message)
-		
-	case "j": // Security List
-		fmt.Println("📋 Security list received")
-		bot.handleSecurityList(message)
-		
-	case "5": // Logout
-		fmt.Println("👋 Logout received")
-		bot.isRunning = false
-		
-	default:
-		// Log unknown message types for debugging
-		fmt.Printf("❓ Unhandled message type: %s\n", msgType)
-	}
-}
 
 func (bot *TradingBot) handleTestRequest(message *ctrader.ResponseMessage) {
 	testReqID := message.GetFieldValue(112)
 	fmt.Printf("Test request received: %v\n", testReqID)
 	
-	// Respond with heartbeat
+	// Respond with heartbeat - this will be called from appropriate message handler
 	heartbeat := ctrader.NewHeartbeat(bot.config)
 	heartbeat.TestReqID = fmt.Sprintf("%v", testReqID)
-	bot.client.Send(heartbeat)
+	
+	// Send response using the appropriate client (this function is called from specific handlers)
+	// The actual send will happen in the calling function
+	fmt.Printf("Heartbeat response prepared for TestReqID: %v\n", testReqID)
 }
 
 func (bot *TradingBot) handleSecurityList(message *ctrader.ResponseMessage) {
@@ -644,7 +742,7 @@ func (bot *TradingBot) tradingLoop() {
 	ticker := time.NewTicker(5 * time.Second) // Check every 5 seconds
 	defer ticker.Stop()
 
-	for bot.isRunning && bot.client.IsConnected() {
+	for bot.isRunning && bot.tradeClient.IsConnected() {
 		select {
 		case <-ticker.C:
 			bot.executeStrategy()
@@ -692,7 +790,7 @@ func (bot *TradingBot) riskManagementLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	for bot.isRunning && bot.client.IsConnected() {
+	for bot.isRunning && bot.tradeClient.IsConnected() {
 		select {
 		case <-ticker.C:
 			bot.checkRiskLimits()
@@ -705,7 +803,7 @@ func (bot *TradingBot) marketDataLoop() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	for bot.isRunning && bot.client.IsConnected() {
+	for bot.isRunning && bot.quoteClient.IsConnected() {
 		select {
 		case <-ticker.C:
 			bot.displayMarketStatus()
@@ -717,7 +815,7 @@ func (bot *TradingBot) statisticsLoop() {
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
-	for bot.isRunning && bot.client.IsConnected() {
+	for bot.isRunning && (bot.quoteClient.IsConnected() || bot.tradeClient.IsConnected()) {
 		select {
 		case <-ticker.C:
 			bot.displayStatistics()
@@ -743,7 +841,18 @@ func (bot *TradingBot) openLongPosition() {
 	bot.orderID++
 	clOrdID := fmt.Sprintf("LONG_%d", bot.orderID)
 	
-	order := ctrader.NewOrderMsg(bot.config)
+	tradeConfig := &ctrader.Config{
+		BeginString:  "FIX.4.4",
+		SenderCompID: bot.config.SenderCompID,
+		TargetCompID: "cServer",
+		TargetSubID:  "TRADE",
+		SenderSubID:  "TRADE",
+		Username:     bot.config.Username,
+		Password:     bot.config.Password,
+		HeartBeat:    30,
+	}
+	
+	order := ctrader.NewOrderMsg(tradeConfig)
 	order.ClOrdID = clOrdID
 	order.Symbol = bot.symbolID // Use numeric symbol ID
 	order.Side = "1" // Buy
@@ -762,7 +871,7 @@ func (bot *TradingBot) openLongPosition() {
 		CreateTime: time.Now(),
 	}
 	
-	if err := bot.client.Send(order); err != nil {
+	if err := bot.tradeClient.Send(order); err != nil {
 		log.Printf("Failed to place long order: %v", err)
 		delete(bot.activeOrders, clOrdID)
 	} else {
@@ -789,7 +898,18 @@ func (bot *TradingBot) openShortPosition() {
 	bot.orderID++
 	clOrdID := fmt.Sprintf("SHORT_%d", bot.orderID)
 	
-	order := ctrader.NewOrderMsg(bot.config)
+	tradeConfig := &ctrader.Config{
+		BeginString:  "FIX.4.4",
+		SenderCompID: bot.config.SenderCompID,
+		TargetCompID: "cServer",
+		TargetSubID:  "TRADE",
+		SenderSubID:  "TRADE",
+		Username:     bot.config.Username,
+		Password:     bot.config.Password,
+		HeartBeat:    30,
+	}
+	
+	order := ctrader.NewOrderMsg(tradeConfig)
 	order.ClOrdID = clOrdID
 	order.Symbol = bot.symbolID // Use numeric symbol ID
 	order.Side = "2" // Sell
@@ -808,7 +928,7 @@ func (bot *TradingBot) openShortPosition() {
 		CreateTime: time.Now(),
 	}
 	
-	if err := bot.client.Send(order); err != nil {
+	if err := bot.tradeClient.Send(order); err != nil {
 		log.Printf("Failed to place short order: %v", err)
 		delete(bot.activeOrders, clOrdID)
 	} else {
@@ -831,14 +951,25 @@ func (bot *TradingBot) closePosition(position *Position) {
 		price = bot.marketData.Ask
 	}
 	
-	order := ctrader.NewOrderMsg(bot.config)
+	tradeConfig := &ctrader.Config{
+		BeginString:  "FIX.4.4",
+		SenderCompID: bot.config.SenderCompID,
+		TargetCompID: "cServer",
+		TargetSubID:  "TRADE",
+		SenderSubID:  "TRADE",
+		Username:     bot.config.Username,
+		Password:     bot.config.Password,
+		HeartBeat:    30,
+	}
+	
+	order := ctrader.NewOrderMsg(tradeConfig)
 	order.ClOrdID = clOrdID
 	order.Symbol = position.Symbol
 	order.Side = side
 	order.OrderQty = position.Size
 	order.OrdType = "1" // Market order
 	
-	if err := bot.client.Send(order); err != nil {
+	if err := bot.tradeClient.Send(order); err != nil {
 		log.Printf("Failed to close position: %v", err)
 	} else {
 		fmt.Printf("🔄 Closing %s position: %.2f lots @ %.5f (PnL: $%.2f)\n", 
@@ -949,18 +1080,6 @@ func (bot *TradingBot) getSideName(side string) string {
 	}
 }
 
-func (bot *TradingBot) handleMessages() {
-	for message := range bot.client.Messages() {
-		// Messages are already handled by the callback
-		_ = message
-	}
-}
-
-func (bot *TradingBot) handleErrors() {
-	for err := range bot.client.Errors() {
-		log.Printf("Client error: %v", err)
-	}
-}
 
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
